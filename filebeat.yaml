@@ -1,0 +1,16 @@
+filebeat.inputs:
+- type: filestream
+  id: instance-logs
+  paths:
+    - /var/log/*.log
+
+processors:
+  - add_host_metadata: ~
+  - add_cloud_metadata: ~
+  - add_docker_metadata: ~
+
+output.console:
+  pretty: true
+
+logging.level: info
+queue.mem.events: 4096
