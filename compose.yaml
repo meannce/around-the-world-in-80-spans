@@ -7,6 +7,7 @@ services:
       - '3000:3000'
     volumes:
       - grafana-storage:/var/lib/grafana
+
   filebeat:
     image: public.ecr.aws/elastic/filebeat:sha256-ce560daed8a62f98a7005fdf96a88eea12dacdcaa4c0154af28a6fe752843c19
     container_name: filebeat
@@ -16,6 +17,19 @@ services:
       - ./filebeat.yaml:/usr/share/filebeat/filebeat.yml:ro
     command: filebeat -e --strict.perms=false
 
+  prometheus:
+    image: prom/prometheus
+    container_name: prometheus
+    restart: unless-stopped
+    ports:
+      - '9090:9090'
+    volumes:
+      - ./prometheus.yaml:/etc/prometheus/prometheus.yaml:ro
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yaml'
+      - '--storage.tsdb.path=/prometheus'
 
 volumes:
   grafana-storage: {}
+  prometheus-data: {}
