@@ -9,3 +9,4 @@ logs:
 
 check:
 	curl -f http://localhost:3000 || echo "Grafana not ready"
+	curl -f http://localhost:9090 || echo "Prometheus not ready"
