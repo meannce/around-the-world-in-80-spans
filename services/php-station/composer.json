@@ -1,0 +1,12 @@
+{
+  "require": {
+    "php": ">=8.2",
+    "open-telemetry/sdk": "^1.0",
+    "open-telemetry/exporter-otlp": "^1.0",
+    "open-telemetry/opentelemetry-auto-slim": "^0.0.1",
+    "slim/slim": "^4.0",
+    "slim/psr7": "^1.0",
+    "guzzlehttp/guzzle": "^7.0"
+  },
+  "minimum-stability": "stable"
+}

@@ -1,0 +1,5 @@
+paho-mqtt==2.1.0
+requests==2.32.3
+opentelemetry-sdk==1.25.0
+opentelemetry-exporter-otlp-proto-grpc==1.25.0
+opentelemetry-instrumentation-requests==0.46b0

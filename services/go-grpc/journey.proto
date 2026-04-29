@@ -1,0 +1,19 @@
+syntax = "proto3";
+package journey;
+option go_package = "github.com/journey/go-grpc/pb";
+
+service JourneyService {
+  rpc PassThrough (JourneyRequest) returns (JourneyResponse);
+}
+
+message JourneyRequest {
+  string journey_id = 1;
+  int32  hop        = 2;
+  repeated string stops = 3;
+}
+
+message JourneyResponse {
+  string status       = 1;
+  string processed_by = 2;
+  repeated string stops = 3;
+}

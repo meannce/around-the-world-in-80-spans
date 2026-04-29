@@ -1,40 +1,411 @@
 services:
-  web:
-    build: .
-    ports:
-      - '5000:5000'
-    logging:
-      driver: "json-file"
-  grafana:
-    image: grafana/grafana-oss
-    container_name: grafana
-    restart: unless-stopped
-    ports:
-      - '3000:3000'
-    volumes:
-      - grafana-storage:/var/lib/grafana
 
-  filebeat:
-    image: public.ecr.aws/elastic/filebeat:sha256-ce560daed8a62f98a7005fdf96a88eea12dacdcaa4c0154af28a6fe752843c19
-    container_name: filebeat
-    restart: unless-stopped
+  # ============================================================
+  # PROXIES / GATEWAYS
+  # ============================================================
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
     volumes:
-      - /var/log:/var/log:ro
-      - ./filebeat.yaml:/usr/share/filebeat/filebeat.yml:ro
-    command: filebeat -e --strict.perms=false
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - entry
+
+  # ============================================================
+  # OBSERVABILITY STACK
+  # ============================================================
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.103.0
+    command: ["--config=/etc/otel-collector.yaml"]
+    volumes:
+      - ./otel-collector.yaml:/etc/otel-collector.yaml:ro
+    ports:
+      - "4317:4317"    # OTLP gRPC
+      - "4318:4318"    # OTLP HTTP
+      - "8888:8888"    # Collector metrics
+    depends_on:
+      - jaeger
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.58
+    ports:
+      - "16686:16686"  # Jaeger UI
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
 
   prometheus:
     image: prom/prometheus
     container_name: prometheus
     restart: unless-stopped
     ports:
-      - '9090:9090'
+      - "9090:9090"
     volumes:
       - ./prometheus.yaml:/etc/prometheus/prometheus.yaml:ro
       - prometheus-data:/prometheus
     command:
       - '--config.file=/etc/prometheus/prometheus.yaml'
       - '--storage.tsdb.path=/prometheus'
+
+  grafana:
+    image: grafana/grafana-oss
+    container_name: grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana-storage:/var/lib/grafana
+
+  loki:
+    image: grafana/loki:3.1.0
+    command: -config.file=/etc/loki/local-config.yaml
+    ports:
+      - "3100:3100"
+
+  # ============================================================
+  # RELATIONAL DATABASES
+  # ============================================================
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: journey
+      POSTGRES_USER: journey
+      POSTGRES_PASSWORD: journey
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U journey"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: journey
+      MYSQL_USER: journey
+      MYSQL_PASSWORD: journey
+      MYSQL_ROOT_PASSWORD: rootpassword
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "journey", "-pjourney"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+
+  cockroachdb:
+    image: cockroachdb/cockroach:v24.1.3
+    command: start-single-node --insecure
+    ports:
+      - "26257:26257"
+      - "8080:8080"    # CockroachDB UI
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+
+  # ============================================================
+  # DOCUMENT / KEY-VALUE STORES
+  # ============================================================
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+
+  mongodb:
+    image: mongo:7
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')", "--quiet"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+
+  memcached:
+    image: memcached:1.6-alpine
+
+  # ============================================================
+  # WIDE-COLUMN / TIME-SERIES / GRAPH / SEARCH
+  # ============================================================
+  scylladb:
+    image: scylladb/scylla:5.4
+    command: --smp 1 --memory 512M --overprovisioned 1 --developer-mode 1
+    healthcheck:
+      test: ["CMD-SHELL", "nodetool status | grep UN"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+
+  elasticsearch:
+    image: elasticsearch:8.14.0
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: -Xms512m -Xmx512m
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health | grep -v '\"status\":\"red\"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  influxdb:
+    image: influxdb:2.7
+    ports:
+      - "8086:8086"
+    environment:
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: admin
+      DOCKER_INFLUXDB_INIT_PASSWORD: password123
+      DOCKER_INFLUXDB_INIT_ORG: journey
+      DOCKER_INFLUXDB_INIT_BUCKET: spans
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: journey-token-12345
+    healthcheck:
+      test: ["CMD", "influx", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+
+  neo4j:
+    image: neo4j:5-community
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    environment:
+      NEO4J_AUTH: none
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:7474 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.6
+    ports:
+      - "8123:8123"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://localhost:8123/ping | grep -q Ok"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+
+  meilisearch:
+    image: getmeili/meilisearch:v1.9
+    environment:
+      MEILI_MASTER_KEY: meili-master-key
+
+  # ============================================================
+  # OBJECT STORAGE
+  # ============================================================
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    ports:
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+
+  # ============================================================
+  # MESSAGE BROKERS
+  # ============================================================
+  kafka:
+    image: bitnami/kafka:3.7
+    environment:
+      KAFKA_CFG_NODE_ID: "0"
+      KAFKA_CFG_PROCESS_ROLES: controller,broker
+      KAFKA_CFG_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_CFG_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: 0@kafka:9093
+      KAFKA_CFG_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE: "true"
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-topics.sh --bootstrap-server localhost:9092 --list"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    ports:
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+
+  nats:
+    image: nats:2.10-alpine
+    command: "-js"
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    volumes:
+      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mosquitto_pub -h localhost -t test -m ping -q 0 || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ============================================================
+  # APP SERVICES — the journey
+  # ============================================================
+  entry:
+    build: ./services/entry
+    ports:
+      - "5000:5000"
+    environment:
+      OTEL_SERVICE_NAME: entry
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      REDIS_URL: redis://redis:6379
+      POSTGRES_DSN: host=postgres dbname=journey user=journey password=journey
+      MYSQL_HOST: mysql
+      MYSQL_USER: journey
+      MYSQL_PASSWORD: journey
+      MYSQL_DB: journey
+      MONGO_URI: mongodb://mongodb:27017
+      MEMCACHED_HOST: memcached:11211
+      ELASTICSEARCH_URL: http://elasticsearch:9200
+      INFLUXDB_URL: http://influxdb:8086
+      INFLUXDB_TOKEN: journey-token-12345
+      INFLUXDB_ORG: journey
+      INFLUXDB_BUCKET: spans
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      NEO4J_URI: bolt://neo4j:7687
+      CLICKHOUSE_URL: http://clickhouse:8123
+      COCKROACH_DSN: postgresql://root@cockroachdb:26257/defaultdb?sslmode=disable
+      MEILISEARCH_URL: http://meilisearch:7700
+      MEILISEARCH_KEY: meili-master-key
+      SCYLLA_HOST: scylladb
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+
+  kafka-consumer:
+    build: ./services/kafka-consumer
+    environment:
+      OTEL_SERVICE_NAME: kafka-consumer
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      NEXT_STOP: http://node-station:3000/journey
+    depends_on:
+      kafka:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+
+  node-station:
+    build: ./services/node-station
+    environment:
+      OTEL_SERVICE_NAME: node-station
+      OTEL_EXPORTER_OTLP_ENDPOINT: grpc://otel-collector:4317
+      GO_GRPC_ADDR: go-grpc:50051
+      NEXT_STOP: http://ruby-station:4567/journey
+
+  go-grpc:
+    build: ./services/go-grpc
+    environment:
+      OTEL_SERVICE_NAME: go-grpc
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+
+  ruby-station:
+    build: ./services/ruby-station
+    environment:
+      OTEL_SERVICE_NAME: ruby-station
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318  # Ruby uses HTTP OTLP
+      NEXT_STOP: http://php-station:8000/journey
+
+  php-station:
+    build: ./services/php-station
+    environment:
+      OTEL_SERVICE_NAME: php-station
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318  # PHP uses HTTP OTLP
+      NEXT_STOP: http://rust-station:8001/journey
+
+  rust-station:
+    build: ./services/rust-station
+    environment:
+      OTEL_SERVICE_NAME: rust-station
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      NEXT_STOP: http://java-station:8082/journey
+
+  java-station:
+    build: ./services/java-station
+    environment:
+      OTEL_SERVICE_NAME: java-station
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      NEXT_STOP: http://dotnet-station:5001/journey
+
+  dotnet-station:
+    build: ./services/dotnet-station
+    environment:
+      OTEL_SERVICE_NAME: dotnet-station
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      NEXT_STOP: http://elixir-station:4000/journey
+
+  elixir-station:
+    build: ./services/elixir-station
+    environment:
+      OTEL_SERVICE_NAME: elixir-station
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+  rabbit-consumer:
+    build: ./services/rabbit-consumer
+    environment:
+      OTEL_SERVICE_NAME: rabbit-consumer
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      NATS_URL: nats://nats:4222
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+  nats-consumer:
+    build: ./services/nats-consumer
+    environment:
+      OTEL_SERVICE_NAME: nats-consumer
+      OTEL_EXPORTER_OTLP_ENDPOINT: grpc://otel-collector:4317
+      NATS_URL: nats://nats:4222
+      MQTT_HOST: mosquitto
+      MQTT_PORT: "1883"
+
+  mqtt-consumer:
+    build: ./services/mqtt-consumer
+    environment:
+      OTEL_SERVICE_NAME: mqtt-consumer
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      MQTT_HOST: mosquitto
+      MQTT_PORT: "1883"
+      ENTRY_URL: http://entry:5000/finalize
+    depends_on:
+      mosquitto:
+        condition: service_healthy
 
 volumes:
   grafana-storage: {}
