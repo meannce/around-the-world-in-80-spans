@@ -23,7 +23,6 @@ defmodule Station.MixProject do
       {:opentelemetry, "~> 1.4"},
       {:opentelemetry_api, "~> 1.4"},
       {:opentelemetry_exporter, "~> 1.7"},
-      {:opentelemetry_plug, "~> 0.2"},
       {:httpoison, "~> 2.0"}
     ]
   end
