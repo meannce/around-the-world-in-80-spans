@@ -20,6 +20,8 @@ end
 class Station < Sinatra::Base
   set :bind, '0.0.0.0'
   set :port, 4567
+  disable :protection
+  set :host_authorization, { permitted_hosts: [] }
 
   post '/journey' do
     content_type :json

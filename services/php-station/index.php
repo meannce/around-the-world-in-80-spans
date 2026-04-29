@@ -9,7 +9,7 @@ use OpenTelemetry\SDK\Common\Attribute\Attributes;
 use OpenTelemetry\SDK\Resource\ResourceInfo;
 use OpenTelemetry\SDK\Sdk;
 use OpenTelemetry\SDK\Trace\Sampler\AlwaysOnSampler;
-use OpenTelemetry\SDK\Trace\SpanProcessor\BatchSpanProcessor;
+use OpenTelemetry\SDK\Trace\SpanProcessor\SimpleSpanProcessor;
 use OpenTelemetry\SDK\Trace\TracerProvider;
 use OpenTelemetry\SemConv\ResourceAttributes;
 use GuzzleHttp\Client as GuzzleClient;
@@ -25,7 +25,7 @@ $transport = (new OtlpHttpTransportFactory())->create($endpoint . '/v1/traces', 
 $exporter  = new SpanExporter($transport);
 
 $tracerProvider = new TracerProvider(
-    new BatchSpanProcessor($exporter),
+    new SimpleSpanProcessor($exporter),
     new AlwaysOnSampler(),
     ResourceInfo::create(Attributes::create([ResourceAttributes::SERVICE_NAME => $serviceName]))
 );
