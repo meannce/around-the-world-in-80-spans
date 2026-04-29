@@ -1,6 +1,7 @@
-FROM rust:alpine AS chef
-RUN apk add --no-cache musl-dev pkgconfig openssl-dev && \
-    cargo install cargo-chef
+FROM rust:slim AS chef
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
+RUN cargo install cargo-chef
 WORKDIR /app
 
 FROM chef AS planner
@@ -13,8 +14,9 @@ RUN cargo chef cook --release --recipe-path recipe.json
 COPY . .
 RUN cargo build --release
 
-FROM alpine:3.20
-RUN apk add --no-cache libgcc
+FROM debian:12-slim
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libssl3 ca-certificates && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=builder /app/target/release/rust-station .
 CMD ["./rust-station"]

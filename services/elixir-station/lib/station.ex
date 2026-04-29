@@ -23,13 +23,10 @@ defmodule Station.Router do
     hop     = (journey["hop"] || 0) + 1
     journey = Map.merge(journey, %{"stops" => stops, "hop" => hop})
 
-    rabbitmq_url = System.get_env("RABBITMQ_URL", "amqp://guest:guest@rabbitmq:5672/")
-
-    # Extract traceparent from incoming headers to propagate
     traceparent = Plug.Conn.get_req_header(conn, "traceparent") |> List.first()
 
     Task.start(fn ->
-      publish_to_rabbit(rabbitmq_url, journey, traceparent)
+      publish_via_http_api(journey, traceparent)
     end)
 
     conn
@@ -47,27 +44,28 @@ defmodule Station.Router do
     send_resp(conn, 404, "not found")
   end
 
-  defp publish_to_rabbit(url, journey, traceparent) do
-    case AMQP.Connection.open(url) do
-      {:ok, conn} ->
-        {:ok, channel} = AMQP.Channel.open(conn)
-        AMQP.Queue.declare(channel, "journey", durable: true)
+  defp publish_via_http_api(journey, traceparent) do
+    # Publish to RabbitMQ via HTTP management API — avoids native AMQP lib
+    rabbit_host = System.get_env("RABBITMQ_HOST", "rabbitmq")
+    api_url = "http://#{rabbit_host}:15672/api/exchanges/%2F//publish"
+    auth    = Base.encode64("guest:guest")
 
-        headers = if traceparent, do: [{"traceparent", :longstr, traceparent}], else: []
+    headers_map = if traceparent, do: %{"traceparent" => traceparent}, else: %{}
 
-        AMQP.Basic.publish(
-          channel,
-          "",
-          "journey",
-          Jason.encode!(journey),
-          content_type: "application/json",
-          headers: headers
-        )
+    body = Jason.encode!(%{
+      properties: %{content_type: "application/json", headers: headers_map},
+      routing_key: "journey",
+      payload: Jason.encode!(journey),
+      payload_encoding: "string"
+    })
 
-        AMQP.Connection.close(conn)
-
-      {:error, reason} ->
-        IO.puts("RabbitMQ publish error: #{inspect(reason)}")
+    case HTTPoison.post(api_url, body, [
+      {"Content-Type", "application/json"},
+      {"Authorization", "Basic #{auth}"}
+    ]) do
+      {:ok, %{status_code: 200}} -> IO.puts("elixir-station: published to RabbitMQ")
+      {:ok, r}                   -> IO.puts("elixir-station: RabbitMQ API #{r.status_code}")
+      {:error, e}                -> IO.puts("elixir-station: RabbitMQ error #{inspect(e)}")
     end
   end
 end

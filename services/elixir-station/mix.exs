@@ -19,7 +19,6 @@ defmodule Station.MixProject do
     [
       {:plug_cowboy, "~> 2.7"},
       {:jason, "~> 1.4"},
-      {:amqp, "~> 3.3"},
       {:opentelemetry, "~> 1.4"},
       {:opentelemetry_api, "~> 1.4"},
       {:opentelemetry_exporter, "~> 1.7"},

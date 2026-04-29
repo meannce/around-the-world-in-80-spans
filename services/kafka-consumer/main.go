@@ -12,6 +12,7 @@ import (
 
 	"github.com/IBM/sarama"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/sdk/resource"
@@ -22,11 +23,11 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 )
 
-type kafkaHeaderCarrier []sarama.RecordHeader
+type kafkaHeaderCarrier []*sarama.RecordHeader
 
 func (c kafkaHeaderCarrier) Get(key string) string {
 	for _, h := range c {
-		if string(h.Key) == key {
+		if h != nil && string(h.Key) == key {
 			return string(h.Value)
 		}
 	}
@@ -34,9 +35,11 @@ func (c kafkaHeaderCarrier) Get(key string) string {
 }
 func (c kafkaHeaderCarrier) Set(key, val string) {}
 func (c kafkaHeaderCarrier) Keys() []string {
-	keys := make([]string, len(c))
-	for i, h := range c {
-		keys[i] = string(h.Key)
+	keys := make([]string, 0, len(c))
+	for _, h := range c {
+		if h != nil {
+			keys = append(keys, string(h.Key))
+		}
 	}
 	return keys
 }
@@ -104,8 +107,9 @@ func (h *handler) ConsumeClaim(sess sarama.ConsumerGroupSession, claim sarama.Co
 			trace.WithSpanKind(trace.SpanKindConsumer),
 		)
 		span.SetAttributes(
-			semconv.MessagingSystem("kafka"),
-			semconv.MessagingDestinationName("journey"),
+			attribute.String("messaging.system", "kafka"),
+			attribute.String("messaging.destination.name", "journey"),
+			semconv.ServiceName("kafka-consumer"),
 		)
 
 		var journey Journey

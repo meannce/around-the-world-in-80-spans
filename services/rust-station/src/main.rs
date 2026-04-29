@@ -37,10 +37,11 @@ fn init_tracer() {
 
     let tracer_provider = opentelemetry_sdk::trace::TracerProvider::builder()
         .with_batch_exporter(exporter, runtime::Tokio)
-        .with_resource(Resource::new(vec![opentelemetry::KeyValue::new(
-            SERVICE_NAME,
-            svc_name,
-        )]))
+        .with_config(
+            opentelemetry_sdk::trace::Config::default().with_resource(Resource::new(vec![
+                opentelemetry::KeyValue::new(SERVICE_NAME, svc_name),
+            ])),
+        )
         .build();
     global::set_tracer_provider(tracer_provider);
 
@@ -59,18 +60,18 @@ async fn journey_handler(
     let next_stop = env::var("NEXT_STOP")
         .unwrap_or_else(|_| "http://java-station:8082/journey".to_string());
 
-    // Extract trace context from incoming headers and inject into outgoing
-    let parent_cx = global::get_text_map_propagator(|prop| {
-        prop.extract(&opentelemetry_http::HeaderExtractor(&incoming))
-    });
-
+    // Manually propagate W3C trace context headers (avoids http crate version conflict)
     let mut out_headers = reqwest::header::HeaderMap::new();
-    global::get_text_map_propagator(|prop| {
-        prop.inject_context(
-            &parent_cx,
-            &mut opentelemetry_http::HeaderInjector(&mut out_headers),
-        )
-    });
+    for name in &["traceparent", "tracestate", "baggage"] {
+        if let Some(val) = incoming.get(*name) {
+            if let (Ok(n), Ok(v)) = (
+                reqwest::header::HeaderName::from_bytes(name.as_bytes()),
+                reqwest::header::HeaderValue::from_bytes(val.as_bytes()),
+            ) {
+                out_headers.insert(n, v);
+            }
+        }
+    }
 
     let client = reqwest::Client::new();
     let _ = client

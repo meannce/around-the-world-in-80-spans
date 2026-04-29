@@ -1,7 +1,6 @@
 require 'opentelemetry/sdk'
 require 'opentelemetry/exporter/otlp'
 require 'opentelemetry/instrumentation/sinatra'
-require 'opentelemetry/instrumentation/net_http'
 require 'sinatra/base'
 require 'faraday'
 require 'json'
@@ -9,8 +8,7 @@ require 'json'
 OpenTelemetry::SDK.configure do |c|
   c.service_name = ENV.fetch('OTEL_SERVICE_NAME', 'ruby-station')
   c.use 'OpenTelemetry::Instrumentation::Sinatra'
-  c.use 'OpenTelemetry::Instrumentation::Net::HTTP'
-  c.add_span_processor(
+c.add_span_processor(
     OpenTelemetry::SDK::Trace::Export::BatchSpanProcessor.new(
       OpenTelemetry::Exporter::OTLP::Exporter.new(
         endpoint: ENV.fetch('OTEL_EXPORTER_OTLP_ENDPOINT', 'http://otel-collector:4317')

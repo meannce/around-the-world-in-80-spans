@@ -372,7 +372,7 @@ services:
     environment:
       OTEL_SERVICE_NAME: elixir-station
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
-      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      RABBITMQ_HOST: rabbitmq
     depends_on:
       rabbitmq:
         condition: service_healthy
